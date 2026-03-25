@@ -1,0 +1,9 @@
+[project]
+name = "paradestatebot"
+version = "0.1.0"
+description = "A bot to automate sending parade state."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "python-telegram-bot>=22.7",
+]
