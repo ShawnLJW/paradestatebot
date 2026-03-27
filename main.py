@@ -1,11 +1,12 @@
 import logging
 import os
-import sqlite3
 from datetime import date, time
 from zoneinfo import ZoneInfo
 
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+
+from db import add_personnel, init_db, list_job_chat_ids, list_personnel, save_job
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -18,10 +19,7 @@ async def send_parade_state(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
     lines.append(f"*Parade state for {date.today().strftime('%y%m%d')}*")
     lines.append("Total strength: /")
 
-    with sqlite3.connect("bot.db") as connection:
-        cursor = connection.cursor()
-        rows = cursor.execute("SELECT rank, name FROM personnel")
-        personnel = [(row[0], row[1]) for row in rows.fetchall()]
+    personnel = list_personnel("bot.db")
 
     for rank, name in personnel:
         lines.append(f"- {rank} {name} ✅")
@@ -64,16 +62,7 @@ async def add_personnel_command(update: Update, context: ContextTypes.DEFAULT_TY
         _ = await message.reply_text("Usage: /addpersonnel <rank> <name...>")
         return
 
-    with sqlite3.connect("bot.db") as connection:
-        cursor = connection.cursor()
-        _ = cursor.execute(
-            "CREATE TABLE IF NOT EXISTS personnel (rank TEXT, name TEXT)"
-        )
-        _ = cursor.execute(
-            "INSERT INTO personnel (rank, name) VALUES (?, ?)",
-            (rank, name),
-        )
-        connection.commit()
+    add_personnel("bot.db", rank, name)
 
     _ = await message.reply_text(f"Added {rank} {name} to personnel.")
 
@@ -92,9 +81,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     assert chat is not None
     chat_id = chat.id
     schedule_job(chat_id, context.job_queue)
-    with sqlite3.connect("bot.db") as connection:
-        cursor = connection.cursor()
-        cursor.execute("INSERT INTO jobs VALUES (?)", (str(chat_id),))
+    save_job("bot.db", chat_id)
     _ = await context.bot.send_message(
         chat_id=chat_id,
         text="Parade state is scheduled at 8am",
@@ -102,14 +89,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def load_jobs(job_queue):
-    with sqlite3.connect("bot.db") as connection:
-        cursor = connection.cursor()
-        _ = cursor.execute("CREATE TABLE IF NOT EXISTS jobs (chat_id INTEGER)")
-        _ = cursor.execute(
-            "CREATE TABLE IF NOT EXISTS personnel (rank TEXT, name TEXT)"
-        )
-        rows = cursor.execute("SELECT chat_id FROM jobs")
-        chat_ids = [row[0] for row in rows.fetchall()]
+    chat_ids = list_job_chat_ids("bot.db")
     for chat_id in chat_ids:
         schedule_job(chat_id, job_queue)
 
@@ -117,6 +97,8 @@ def load_jobs(job_queue):
 if __name__ == "__main__":
     BOT_TOKEN = os.getenv("BOT_TOKEN")
     assert BOT_TOKEN, "No token in environment variables"
+
+    init_db("bot.db")
 
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     load_jobs(application.job_queue)
