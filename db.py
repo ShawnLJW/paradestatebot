@@ -31,6 +31,18 @@ def add_personnel(db_path: str, rank: str, name: str) -> None:
         connection.commit()
 
 
+def remove_personnel(db_path: str, rank: str, name: str) -> bool:
+    with sqlite3.connect(db_path) as connection:
+        cursor = connection.cursor()
+        cursor.execute(
+            "DELETE FROM personnel WHERE rank = ? AND name = ?",
+            (rank, name),
+        )
+        connection.commit()
+        print(cursor.rowcount)
+        return cursor.rowcount > 0
+
+
 def list_personnel(db_path: str) -> list[tuple[str, str]]:
     with sqlite3.connect(db_path) as connection:
         cursor = connection.cursor()

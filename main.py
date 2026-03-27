@@ -6,7 +6,14 @@ from zoneinfo import ZoneInfo
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-from db import add_personnel, init_db, list_job_chat_ids, list_personnel, save_job
+from db import (
+    add_personnel,
+    init_db,
+    list_job_chat_ids,
+    list_personnel,
+    remove_personnel,
+    save_job,
+)
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -66,6 +73,31 @@ async def add_personnel_command(update: Update, context: ContextTypes.DEFAULT_TY
     _ = await message.reply_text(f"Added {rank} {name} to personnel.")
 
 
+async def remove_personnel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    assert message is not None
+
+    args = context.args or []
+
+    if len(args) < 2:
+        _ = await message.reply_text("Usage: /removepersonnel <rank> <name...>")
+        return
+
+    rank = args[0].strip()
+    name = " ".join(args[1:]).strip()
+
+    if not rank or not name:
+        _ = await message.reply_text("Usage: /removepersonnel <rank> <name...>")
+        return
+
+    removed = remove_personnel("bot.db", rank, name)
+
+    if removed:
+        _ = await message.reply_text(f"Removed {rank} {name} from personnel.")
+    else:
+        _ = await message.reply_text(f"No personnel found for {rank} {name}.")
+
+
 def schedule_job(chat_id: int, job_queue):
     _ = job_queue.run_daily(
         send_parade_state_job,
@@ -105,9 +137,13 @@ if __name__ == "__main__":
     start_handler = CommandHandler("start", start)
     send_handler = CommandHandler("send", send_parade_state_command)
     add_personnel_handler = CommandHandler("addpersonnel", add_personnel_command)
+    remove_personnel_handler = CommandHandler(
+        "removepersonnel", remove_personnel_command
+    )
 
     application.add_handler(start_handler)
     application.add_handler(send_handler)
     application.add_handler(add_personnel_handler)
+    application.add_handler(remove_personnel_handler)
 
     application.run_polling()
