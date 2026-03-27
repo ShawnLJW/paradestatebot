@@ -7,11 +7,15 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 from db import (
+    add_absence,
     add_personnel,
+    get_personnel_id,
     init_db,
+    list_absences_for_date,
     list_job_chat_ids,
     list_personnel,
     remove_personnel,
+    remove_absence,
     save_job,
 )
 
@@ -23,12 +27,18 @@ logging.basicConfig(
 
 async def send_parade_state(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
     personnel = list_personnel("bot.db")
+    absences = list_absences_for_date("bot.db", date.today().isoformat())
     lines: list[str] = []
 
-    lines.append(f"*Parade state for {date.today().strftime('%y%m%d')}*")
-    lines.append(f"Total strength: {len(personnel)}/{len(personnel)}")
-    for rank, name in personnel:
-        lines.append(f"- {rank} {name} ✅")
+    lines.append(f"*Parade state for {date.today().strftime('%d%m%y')}*")
+    lines.append(f"Total strength: {len(personnel) - len(absences)}/{len(personnel)}")
+    lines.append("")
+    for personnel_id, rank, name in personnel:
+        reason = absences.get(personnel_id)
+        if reason:
+            lines.append(f"- {rank} {name} ❌ {reason}")
+        else:
+            lines.append(f"- {rank} {name} ✅")
 
     _ = await context.bot.send_message(
         chat_id=chat_id,
@@ -98,6 +108,104 @@ async def remove_personnel_command(update: Update, context: ContextTypes.DEFAULT
         _ = await message.reply_text(f"No personnel found for {rank} {name}.")
 
 
+async def absent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    assert message is not None
+
+    args = context.args or []
+
+    if len(args) < 3:
+        _ = await message.reply_text(
+            "Usage: /absent <rank> <name...> <YYYY-MM-DD> <reason...>"
+        )
+        return
+
+    rank = args[0].strip()
+    date_index = None
+    for index in range(1, len(args)):
+        try:
+            date.fromisoformat(args[index])
+        except ValueError:
+            continue
+        date_index = index
+        break
+
+    if date_index is None or date_index == 1 or date_index == len(args) - 1:
+        _ = await message.reply_text(
+            "Usage: /absent <rank> <name...> <YYYY-MM-DD> <reason...>"
+        )
+        return
+
+    name = " ".join(args[1:date_index]).strip()
+    date_text = args[date_index].strip()
+    reason = " ".join(args[date_index + 1 :]).strip()
+
+    if not rank or not name or not date_text or not reason:
+        _ = await message.reply_text(
+            "Usage: /absent <rank> <name...> <YYYY-MM-DD> <reason...>"
+        )
+        return
+
+    try:
+        date.fromisoformat(date_text)
+    except ValueError:
+        _ = await message.reply_text("Date must be in YYYY-MM-DD format.")
+        return
+
+    personnel_id = get_personnel_id("bot.db", rank, name)
+    if personnel_id is None:
+        _ = await message.reply_text(f"No personnel found for {rank} {name}.")
+        return
+
+    add_absence("bot.db", personnel_id, date_text, reason)
+    _ = await message.reply_text(f"Marked {rank} {name} absent on {date_text}.")
+
+
+async def present_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.effective_message
+    assert message is not None
+
+    args = context.args or []
+
+    if len(args) < 3:
+        _ = await message.reply_text("Usage: /present <rank> <name...> <YYYY-MM-DD>")
+        return
+
+    rank = args[0].strip()
+    date_index = None
+    for index in range(1, len(args)):
+        try:
+            date.fromisoformat(args[index])
+        except ValueError:
+            continue
+        date_index = index
+        break
+
+    if date_index is None or date_index == 1:
+        _ = await message.reply_text("Usage: /present <rank> <name...> <YYYY-MM-DD>")
+        return
+
+    name = " ".join(args[1:date_index]).strip()
+    date_text = args[date_index].strip()
+
+    if not rank or not name or not date_text:
+        _ = await message.reply_text("Usage: /present <rank> <name...> <YYYY-MM-DD>")
+        return
+
+    personnel_id = get_personnel_id("bot.db", rank, name)
+    if personnel_id is None:
+        _ = await message.reply_text(f"No personnel found for {rank} {name}.")
+        return
+
+    removed = remove_absence("bot.db", personnel_id, date_text)
+    if removed:
+        _ = await message.reply_text(f"Marked {rank} {name} present on {date_text}.")
+    else:
+        _ = await message.reply_text(
+            f"No absence found for {rank} {name} on {date_text}."
+        )
+
+
 def schedule_job(chat_id: int, job_queue):
     _ = job_queue.run_daily(
         send_parade_state_job,
@@ -140,10 +248,14 @@ if __name__ == "__main__":
     remove_personnel_handler = CommandHandler(
         "removepersonnel", remove_personnel_command
     )
+    absent_handler = CommandHandler("absent", absent_command)
+    present_handler = CommandHandler("present", present_command)
 
     application.add_handler(start_handler)
     application.add_handler(send_handler)
     application.add_handler(add_personnel_handler)
     application.add_handler(remove_personnel_handler)
+    application.add_handler(absent_handler)
+    application.add_handler(present_handler)
 
     application.run_polling()

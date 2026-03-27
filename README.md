@@ -17,3 +17,8 @@ Then run:
 ```bash
 uv run --env-file=.env main.py
 ```
+
+### Commands
+
+- `/absent <rank> <name...> <YYYY-MM-DD> <reason...>` to mark someone absent for a date.
+- `/present <rank> <name...> <YYYY-MM-DD>` to remove an absence for a date.
