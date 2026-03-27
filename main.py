@@ -15,12 +15,11 @@ logging.basicConfig(
 
 
 async def send_parade_state(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
-    lines: list[str] = []
-    lines.append(f"*Parade state for {date.today().strftime('%y%m%d')}*")
-    lines.append("Total strength: /")
-
     personnel = list_personnel("bot.db")
+    lines: list[str] = []
 
+    lines.append(f"*Parade state for {date.today().strftime('%y%m%d')}*")
+    lines.append(f"Total strength: {len(personnel)}/{len(personnel)}")
     for rank, name in personnel:
         lines.append(f"- {rank} {name} ✅")
 
