@@ -124,7 +124,7 @@ async def absent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     date_index = None
     for index in range(1, len(args)):
         try:
-            date.fromisoformat(args[index])
+            datetime.strptime(args[index], "%d%m%y").date()
         except ValueError:
             continue
         date_index = index
@@ -177,7 +177,7 @@ async def present_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     date_index = None
     for index in range(1, len(args)):
         try:
-            date.fromisoformat(args[index])
+            datetime.strptime(args[index], "%d%m%y").date()
         except ValueError:
             continue
         date_index = index
