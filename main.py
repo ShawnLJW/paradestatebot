@@ -1,6 +1,6 @@
 import logging
 import os
-from datetime import date, time
+from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
 from telegram import Update
@@ -116,7 +116,7 @@ async def absent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if len(args) < 3:
         _ = await message.reply_text(
-            "Usage: /absent <rank> <name...> <YYYY-MM-DD> <reason...>"
+            "Usage: /absent <rank> <name...> <DDMMYY> <reason...>"
         )
         return
 
@@ -132,7 +132,7 @@ async def absent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if date_index is None or date_index == 1 or date_index == len(args) - 1:
         _ = await message.reply_text(
-            "Usage: /absent <rank> <name...> <YYYY-MM-DD> <reason...>"
+            "Usage: /absent <rank> <name...> <DDMMYY> <reason...>"
         )
         return
 
@@ -142,14 +142,14 @@ async def absent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not rank or not name or not date_text or not reason:
         _ = await message.reply_text(
-            "Usage: /absent <rank> <name...> <YYYY-MM-DD> <reason...>"
+            "Usage: /absent <rank> <name...> <DDMMYY> <reason...>"
         )
         return
 
     try:
-        date.fromisoformat(date_text)
+        absent_date = datetime.strptime(date_text, "%d%m%y").date()
     except ValueError:
-        _ = await message.reply_text("Date must be in YYYY-MM-DD format.")
+        _ = await message.reply_text("Date must be in DDMMYY format.")
         return
 
     personnel_id = get_personnel_id("bot.db", rank, name)
@@ -157,8 +157,10 @@ async def absent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _ = await message.reply_text(f"No personnel found for {rank} {name}.")
         return
 
-    add_absence("bot.db", personnel_id, date_text, reason)
-    _ = await message.reply_text(f"Marked {rank} {name} absent on {date_text}.")
+    add_absence("bot.db", personnel_id, absent_date.isoformat(), reason)
+    _ = await message.reply_text(
+        f"Marked {rank} {name} absent on {absent_date.strftime('%d%m%y')}."
+    )
 
 
 async def present_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -168,7 +170,7 @@ async def present_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args or []
 
     if len(args) < 3:
-        _ = await message.reply_text("Usage: /present <rank> <name...> <YYYY-MM-DD>")
+        _ = await message.reply_text("Usage: /present <rank> <name...> <DDMMYY>")
         return
 
     rank = args[0].strip()
@@ -182,14 +184,20 @@ async def present_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         break
 
     if date_index is None or date_index == 1:
-        _ = await message.reply_text("Usage: /present <rank> <name...> <YYYY-MM-DD>")
+        _ = await message.reply_text("Usage: /present <rank> <name...> <DDMMYY>")
         return
 
     name = " ".join(args[1:date_index]).strip()
     date_text = args[date_index].strip()
 
     if not rank or not name or not date_text:
-        _ = await message.reply_text("Usage: /present <rank> <name...> <YYYY-MM-DD>")
+        _ = await message.reply_text("Usage: /present <rank> <name...> <DDMMYY>")
+        return
+
+    try:
+        absent_date = datetime.strptime(date_text, "%d%m%y").date()
+    except ValueError:
+        _ = await message.reply_text("Date must be in DDMMYY format.")
         return
 
     personnel_id = get_personnel_id("bot.db", rank, name)
@@ -197,12 +205,14 @@ async def present_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _ = await message.reply_text(f"No personnel found for {rank} {name}.")
         return
 
-    removed = remove_absence("bot.db", personnel_id, date_text)
+    removed = remove_absence("bot.db", personnel_id, absent_date.isoformat())
     if removed:
-        _ = await message.reply_text(f"Marked {rank} {name} present on {date_text}.")
+        _ = await message.reply_text(
+            f"Marked {rank} {name} present on {absent_date.strftime('%d%m%y')}."
+        )
     else:
         _ = await message.reply_text(
-            f"No absence found for {rank} {name} on {date_text}."
+            f"No absence found for {rank} {name} on {absent_date.strftime('%d%m%y')}."
         )
 
 
