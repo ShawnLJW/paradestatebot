@@ -20,8 +20,8 @@ uv run --env-file=.env main.py
 
 ### Commands
 
-- `/absent <rank> <name...> <YYYY-MM-DD> <reason...>` to mark someone absent for a date.
-- `/present <rank> <name...> <YYYY-MM-DD>` to remove an absence for a date.
+- `/absent <rank> <name...> <DDMMYY[-DDMMYY]> <reason...>` to mark someone absent for a date or a range of dates, e.g. `/absent CPL John Tan 090726-110726 MC`.
+- `/absences <rank> <name...>` to list someone's upcoming absences with buttons to delete them.
 
 ### Deployment
 

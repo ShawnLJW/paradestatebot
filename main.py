@@ -3,8 +3,13 @@ import os
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import (
+    ApplicationBuilder,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+)
 
 from db import (
     add_absence,
@@ -12,10 +17,11 @@ from db import (
     get_personnel_id,
     init_db,
     list_absences_for_date,
+    list_absences_for_personnel,
     list_job_chat_ids,
     list_personnel,
-    remove_personnel,
     remove_absence,
+    remove_personnel,
     save_job,
 )
 
@@ -83,8 +89,16 @@ async def send_parade_state(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
         )
     lines.append("")
     for personnel_id, rank, name in personnel:
-        reason = absences.get(personnel_id)
-        status = reason if reason else "In Camp"
+        absence = absences.get(personnel_id)
+        if absence is None:
+            status = "In Camp"
+        else:
+            reason, start_text, end_text = absence
+            start_date = date.fromisoformat(start_text)
+            end_date = date.fromisoformat(end_text)
+            status = reason
+            if start_date != end_date:
+                status = f"{reason} {format_date_range(start_date, end_date)}"
         lines.append(f"{rank} {name} ({status})")
 
     _ = await context.bot.send_message(
@@ -155,6 +169,23 @@ async def remove_personnel_command(update: Update, context: ContextTypes.DEFAULT
         _ = await message.reply_text(f"No personnel found for {rank} {name}.")
 
 
+def parse_date_or_range(text: str) -> tuple[date, date] | None:
+    parts = text.split("-")
+    if len(parts) not in (1, 2):
+        return None
+    try:
+        parsed = [datetime.strptime(part, "%d%m%y").date() for part in parts]
+    except ValueError:
+        return None
+    return (parsed[0], parsed[-1])
+
+
+def format_date_range(start_date: date, end_date: date) -> str:
+    if start_date == end_date:
+        return start_date.strftime("%d%m%y")
+    return f"{start_date.strftime('%d%m%y')}-{end_date.strftime('%d%m%y')}"
+
+
 async def absent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
     assert message is not None
@@ -163,23 +194,21 @@ async def absent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if len(args) < 3:
         _ = await message.reply_text(
-            "Usage: /absent <rank> <name...> <DDMMYY> <reason...>"
+            "Usage: /absent <rank> <name...> <DDMMYY[-DDMMYY]> <reason...>"
         )
         return
 
     rank = args[0].strip()
     date_index = None
     for index in range(1, len(args)):
-        try:
-            datetime.strptime(args[index], "%d%m%y").date()
-        except ValueError:
+        if parse_date_or_range(args[index]) is None:
             continue
         date_index = index
         break
 
     if date_index is None or date_index == 1 or date_index == len(args) - 1:
         _ = await message.reply_text(
-            "Usage: /absent <rank> <name...> <DDMMYY> <reason...>"
+            "Usage: /absent <rank> <name...> <DDMMYY[-DDMMYY]> <reason...>"
         )
         return
 
@@ -189,14 +218,23 @@ async def absent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not rank or not name or not date_text or not reason:
         _ = await message.reply_text(
-            "Usage: /absent <rank> <name...> <DDMMYY> <reason...>"
+            "Usage: /absent <rank> <name...> <DDMMYY[-DDMMYY]> <reason...>"
         )
         return
 
-    try:
-        absent_date = datetime.strptime(date_text, "%d%m%y").date()
-    except ValueError:
-        _ = await message.reply_text("Date must be in DDMMYY format.")
+    date_range = parse_date_or_range(date_text)
+    if date_range is None:
+        _ = await message.reply_text("Date must be in DDMMYY or DDMMYY-DDMMYY format.")
+        return
+
+    start_date, end_date = date_range
+    if end_date < start_date:
+        _ = await message.reply_text("End date must not be before start date.")
+        return
+
+    day_count = (end_date - start_date).days + 1
+    if day_count > 366:
+        _ = await message.reply_text("Range too long - check the dates.")
         return
 
     personnel_id = get_personnel_id("bot.db", rank, name)
@@ -204,47 +242,59 @@ async def absent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _ = await message.reply_text(f"No personnel found for {rank} {name}.")
         return
 
-    add_absence("bot.db", personnel_id, absent_date.isoformat(), reason)
-    _ = await message.reply_text(
-        f"Marked {rank} {name} absent on {absent_date.strftime('%d%m%y')}."
+    add_absence(
+        "bot.db", personnel_id, start_date.isoformat(), end_date.isoformat(), reason
+    )
+    if start_date == end_date:
+        _ = await message.reply_text(
+            f"Marked {rank} {name} absent on {start_date.strftime('%d%m%y')}."
+        )
+    else:
+        _ = await message.reply_text(
+            f"Marked {rank} {name} absent from {start_date.strftime('%d%m%y')} "
+            f"to {end_date.strftime('%d%m%y')} ({day_count} days)."
+        )
+
+
+def build_absence_list(
+    personnel_id: int, rank: str, name: str
+) -> tuple[str, InlineKeyboardMarkup | None]:
+    rows = list_absences_for_personnel(
+        "bot.db", personnel_id, date.today().isoformat()
+    )
+    if not rows:
+        return (f"No upcoming absences for {rank} {name}.", None)
+
+    buttons = [
+        [
+            InlineKeyboardButton(
+                f"❌ {format_date_range(date.fromisoformat(start_text), date.fromisoformat(end_text))} {reason}",
+                callback_data=f"del:{personnel_id}:{absence_id}",
+            )
+        ]
+        for absence_id, start_text, end_text, reason in rows
+    ]
+    return (
+        f"{rank} {name} (tap an absence to delete it):",
+        InlineKeyboardMarkup(buttons),
     )
 
 
-async def present_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def absences_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
     assert message is not None
 
     args = context.args or []
 
-    if len(args) < 3:
-        _ = await message.reply_text("Usage: /present <rank> <name...> <DDMMYY>")
+    if len(args) < 2:
+        _ = await message.reply_text("Usage: /absences <rank> <name...>")
         return
 
     rank = args[0].strip()
-    date_index = None
-    for index in range(1, len(args)):
-        try:
-            datetime.strptime(args[index], "%d%m%y").date()
-        except ValueError:
-            continue
-        date_index = index
-        break
+    name = " ".join(args[1:]).strip()
 
-    if date_index is None or date_index == 1:
-        _ = await message.reply_text("Usage: /present <rank> <name...> <DDMMYY>")
-        return
-
-    name = " ".join(args[1:date_index]).strip()
-    date_text = args[date_index].strip()
-
-    if not rank or not name or not date_text:
-        _ = await message.reply_text("Usage: /present <rank> <name...> <DDMMYY>")
-        return
-
-    try:
-        absent_date = datetime.strptime(date_text, "%d%m%y").date()
-    except ValueError:
-        _ = await message.reply_text("Date must be in DDMMYY format.")
+    if not rank or not name:
+        _ = await message.reply_text("Usage: /absences <rank> <name...>")
         return
 
     personnel_id = get_personnel_id("bot.db", rank, name)
@@ -252,15 +302,43 @@ async def present_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _ = await message.reply_text(f"No personnel found for {rank} {name}.")
         return
 
-    removed = remove_absence("bot.db", personnel_id, absent_date.isoformat())
+    text, keyboard = build_absence_list(personnel_id, rank, name)
+    _ = await message.reply_text(text, reply_markup=keyboard)
+
+
+async def delete_absence_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    assert query is not None
+    assert query.data is not None
+
+    parts = query.data.split(":")
+    if len(parts) != 3:
+        await query.answer("This list is outdated, run /absences again.")
+        return
+    _, personnel_id_text, absence_id_text = parts
+    try:
+        personnel_id = int(personnel_id_text)
+        absence_id = int(absence_id_text)
+    except ValueError:
+        await query.answer("This list is outdated, run /absences again.")
+        return
+
+    removed = remove_absence("bot.db", absence_id)
     if removed:
-        _ = await message.reply_text(
-            f"Marked {rank} {name} present on {absent_date.strftime('%d%m%y')}."
-        )
+        await query.answer("Deleted absence.")
     else:
-        _ = await message.reply_text(
-            f"No absence found for {rank} {name} on {absent_date.strftime('%d%m%y')}."
-        )
+        await query.answer("Absence already deleted.")
+
+    person = next(
+        (row for row in list_personnel("bot.db") if row[0] == personnel_id), None
+    )
+    if person is None:
+        _ = await query.edit_message_text("Personnel no longer exists.")
+        return
+
+    _, rank, name = person
+    text, keyboard = build_absence_list(personnel_id, rank, name)
+    _ = await query.edit_message_text(text, reply_markup=keyboard)
 
 
 def schedule_job(chat_id: int, job_queue):
@@ -306,13 +384,17 @@ if __name__ == "__main__":
         "removepersonnel", remove_personnel_command
     )
     absent_handler = CommandHandler("absent", absent_command)
-    present_handler = CommandHandler("present", present_command)
+    absences_handler = CommandHandler("absences", absences_command)
+    delete_absence_handler = CallbackQueryHandler(
+        delete_absence_callback, pattern=r"^del:"
+    )
 
     application.add_handler(start_handler)
     application.add_handler(send_handler)
     application.add_handler(add_personnel_handler)
     application.add_handler(remove_personnel_handler)
     application.add_handler(absent_handler)
-    application.add_handler(present_handler)
+    application.add_handler(absences_handler)
+    application.add_handler(delete_absence_handler)
 
     application.run_polling()
