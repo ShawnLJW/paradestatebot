@@ -24,21 +24,68 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
+CATEGORIES = ["OFFICER", "WOSPEC", "TROOPER"]
+RANK_TO_CATEGORY: dict[str, str] = {
+    "PTE": "TROOPER",
+    "LCP": "TROOPER",
+    "CPL": "TROOPER",
+    "CFC": "TROOPER",
+    "3SG": "WOSPEC",
+    "2SG": "WOSPEC",
+    "1SG": "WOSPEC",
+    "SSG": "WOSPEC",
+    "MSG": "WOSPEC",
+    "3WO": "WOSPEC",
+    "2WO": "WOSPEC",
+    "1WO": "WOSPEC",
+    "MWO": "WOSPEC",
+    "SWO": "WOSPEC",
+    "CWO": "WOSPEC",
+    "2LT": "OFFICER",
+    "LTA": "OFFICER",
+    "CPT": "OFFICER",
+    "MAJ": "OFFICER",
+    "LTC": "OFFICER",
+    "SLTC": "OFFICER",
+    "COL": "OFFICER",
+    "BG": "OFFICER",
+    "MG": "OFFICER",
+    "LG": "OFFICER",
+}
+
 
 async def send_parade_state(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
     personnel = list_personnel("bot.db")
     absences = list_absences_for_date("bot.db", date.today().isoformat())
-    lines: list[str] = []
 
-    lines.append(f"*Parade state for {date.today().strftime('%d%m%y')}*")
-    lines.append(f"Total strength: {len(personnel) - len(absences)}/{len(personnel)}")
+    category_totals: dict[str, int] = {category: 0 for category in CATEGORIES}
+    category_present: dict[str, int] = {category: 0 for category in CATEGORIES}
+    for personnel_id, rank, _name in personnel:
+        category = RANK_TO_CATEGORY.get(rank, "TROOPER")
+        category_totals[category] += 1
+        if personnel_id not in absences:
+            category_present[category] += 1
+
+    total_count = len(personnel)
+    present_count = total_count - len(absences)
+
+    lines: list[str] = []
+    lines.append("SAT POOL")
+    lines.append("")
+    lines.append(date.today().strftime("%d%m%y"))
+    lines.append("")
+    lines.append(f"[QM PLT]: {present_count:02d}/{total_count:02d}")
+    for category in CATEGORIES:
+        if category_totals[category] == 0:
+            continue
+        lines.append(
+            f"[{category}]: {category_present[category]:02d}/{category_totals[category]:02d}"
+        )
     lines.append("")
     for personnel_id, rank, name in personnel:
         reason = absences.get(personnel_id)
-        if reason:
-            lines.append(f"- {rank} {name} ❌ {reason}")
-        else:
-            lines.append(f"- {rank} {name} ✅")
+        status = reason if reason else "In Camp"
+        lines.append(f"{rank} {name} ({status})")
 
     _ = await context.bot.send_message(
         chat_id=chat_id,
