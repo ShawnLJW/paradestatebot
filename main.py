@@ -369,6 +369,24 @@ def load_jobs(job_queue):
         schedule_job(chat_id, job_queue)
 
 
+async def notify_startup(application):
+    for chat_id in list_job_chat_ids(DB_PATH):
+        try:
+            _ = await application.bot.send_message(chat_id=chat_id, text="Bot is online")
+        except Exception:
+            logging.exception("Failed to send startup message to %s", chat_id)
+
+
+async def notify_shutdown(application):
+    for chat_id in list_job_chat_ids(DB_PATH):
+        try:
+            _ = await application.bot.send_message(
+                chat_id=chat_id, text="Bot is shutting down"
+            )
+        except Exception:
+            logging.exception("Failed to send shutdown message to %s", chat_id)
+
+
 if __name__ == "__main__":
     BOT_TOKEN = os.getenv("BOT_TOKEN")
     DB_PATH = os.getenv("DB_PATH", "bot.db")
@@ -380,7 +398,13 @@ if __name__ == "__main__":
 
     init_db(DB_PATH)
 
-    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    application = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .post_init(notify_startup)
+        .post_stop(notify_shutdown)
+        .build()
+    )
     load_jobs(application.job_queue)
 
     start_handler = CommandHandler("start", start)
