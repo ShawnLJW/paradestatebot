@@ -30,6 +30,7 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
+
 CATEGORIES = ["OFFICER", "WOSPEC", "TROOPER"]
 RANK_TO_CATEGORY: dict[str, str] = {
     "PTE": "TROOPER",
@@ -61,8 +62,8 @@ RANK_TO_CATEGORY: dict[str, str] = {
 
 
 async def send_parade_state(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
-    personnel = list_personnel("bot.db")
-    absences = list_absences_for_date("bot.db", date.today().isoformat())
+    personnel = list_personnel(DB_PATH)
+    absences = list_absences_for_date(DB_PATH, date.today().isoformat())
 
     category_totals: dict[str, int] = {category: 0 for category in CATEGORIES}
     category_present: dict[str, int] = {category: 0 for category in CATEGORIES}
@@ -139,7 +140,7 @@ async def add_personnel_command(update: Update, context: ContextTypes.DEFAULT_TY
         _ = await message.reply_text("Usage: /addpersonnel <rank> <name...>")
         return
 
-    add_personnel("bot.db", rank, name)
+    add_personnel(DB_PATH, rank, name)
 
     _ = await message.reply_text(f"Added {rank} {name} to personnel.")
 
@@ -161,7 +162,7 @@ async def remove_personnel_command(update: Update, context: ContextTypes.DEFAULT
         _ = await message.reply_text("Usage: /removepersonnel <rank> <name...>")
         return
 
-    removed = remove_personnel("bot.db", rank, name)
+    removed = remove_personnel(DB_PATH, rank, name)
 
     if removed:
         _ = await message.reply_text(f"Removed {rank} {name} from personnel.")
@@ -237,13 +238,13 @@ async def absent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _ = await message.reply_text("Range too long - check the dates.")
         return
 
-    personnel_id = get_personnel_id("bot.db", rank, name)
+    personnel_id = get_personnel_id(DB_PATH, rank, name)
     if personnel_id is None:
         _ = await message.reply_text(f"No personnel found for {rank} {name}.")
         return
 
     add_absence(
-        "bot.db", personnel_id, start_date.isoformat(), end_date.isoformat(), reason
+        DB_PATH, personnel_id, start_date.isoformat(), end_date.isoformat(), reason
     )
     if start_date == end_date:
         _ = await message.reply_text(
@@ -260,7 +261,7 @@ def build_absence_list(
     personnel_id: int, rank: str, name: str
 ) -> tuple[str, InlineKeyboardMarkup | None]:
     rows = list_absences_for_personnel(
-        "bot.db", personnel_id, date.today().isoformat()
+        DB_PATH, personnel_id, date.today().isoformat()
     )
     if not rows:
         return (f"No upcoming absences for {rank} {name}.", None)
@@ -297,7 +298,7 @@ async def absences_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _ = await message.reply_text("Usage: /absences <rank> <name...>")
         return
 
-    personnel_id = get_personnel_id("bot.db", rank, name)
+    personnel_id = get_personnel_id(DB_PATH, rank, name)
     if personnel_id is None:
         _ = await message.reply_text(f"No personnel found for {rank} {name}.")
         return
@@ -323,14 +324,14 @@ async def delete_absence_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.answer("This list is outdated, run /absences again.")
         return
 
-    removed = remove_absence("bot.db", absence_id)
+    removed = remove_absence(DB_PATH, absence_id)
     if removed:
         await query.answer("Deleted absence.")
     else:
         await query.answer("Absence already deleted.")
 
     person = next(
-        (row for row in list_personnel("bot.db") if row[0] == personnel_id), None
+        (row for row in list_personnel(DB_PATH) if row[0] == personnel_id), None
     )
     if person is None:
         _ = await query.edit_message_text("Personnel no longer exists.")
@@ -355,7 +356,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     assert chat is not None
     chat_id = chat.id
     schedule_job(chat_id, context.job_queue)
-    save_job("bot.db", chat_id)
+    save_job(DB_PATH, chat_id)
     _ = await context.bot.send_message(
         chat_id=chat_id,
         text="Parade state is scheduled at 8am",
@@ -363,16 +364,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def load_jobs(job_queue):
-    chat_ids = list_job_chat_ids("bot.db")
+    chat_ids = list_job_chat_ids(DB_PATH)
     for chat_id in chat_ids:
         schedule_job(chat_id, job_queue)
 
 
 if __name__ == "__main__":
     BOT_TOKEN = os.getenv("BOT_TOKEN")
+    DB_PATH = os.getenv("DB_PATH", "bot.db")
     assert BOT_TOKEN, "No token in environment variables"
 
-    init_db("bot.db")
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
+
+    init_db(DB_PATH)
 
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     load_jobs(application.job_queue)
