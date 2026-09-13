@@ -4,7 +4,6 @@ from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.constants import ParseMode
 from telegram.ext import (
     ApplicationBuilder,
     CallbackQueryHandler,
@@ -32,15 +31,6 @@ logging.basicConfig(
 )
 
 
-MARKDOWN_V2_SPECIAL = "_*[]()~`>#+-=|{}.!"
-
-
-def escape_markdown_v2(text: str) -> str:
-    return "".join(
-        f"\\{char}" if char in MARKDOWN_V2_SPECIAL else char for char in text
-    )
-
-
 async def send_parade_state(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
     personnel = list_personnel(DB_PATH)
     absences = list_absences_for_date(DB_PATH, date.today().isoformat())
@@ -48,17 +38,14 @@ async def send_parade_state(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
     total_count = len(personnel)
     present_count = total_count - len(absences)
 
-    today_text = escape_markdown_v2(date.today().strftime("%d%m%y"))
-
     lines: list[str] = []
-    lines.append(f"*Parade state for {today_text}*")
+    lines.append(f"*Parade state for {date.today().strftime('%d%m%y')}*")
     lines.append(f"Total strength: {present_count}/{total_count}")
     lines.append("")
     for personnel_id, rank, name in personnel:
-        person_text = escape_markdown_v2(f"{rank} {name}")
         absence = absences.get(personnel_id)
         if absence is None:
-            lines.append(f"\\- {person_text} \u2705")
+            lines.append(f"- {rank} {name} \u2705")
             continue
 
         reason, start_text, end_text = absence
@@ -67,12 +54,11 @@ async def send_parade_state(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
         status = reason
         if start_date != end_date:
             status = f"{reason} {format_date_range(start_date, end_date)}"
-        lines.append(f"\\- {person_text} \u274c {escape_markdown_v2(status)}")
+        lines.append(f"- {rank} {name} \u274c {status}")
 
     _ = await context.bot.send_message(
         chat_id=chat_id,
         text="\n".join(lines),
-        parse_mode=ParseMode.MARKDOWN_V2,
     )
 
 
